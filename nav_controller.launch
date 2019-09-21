@@ -1,0 +1,22 @@
+<!--
+    Launcher for rtabmap navigation controlled by nav_commander_node
+-->
+<launch>
+  <node pkg="nav_commander" type="nav_commander_node" name="nav_commander"
+        respawn="true"
+        output="screen">
+
+    <!-- home goal position -->
+    <param name="goal_0_pos" value="1234567890" />
+
+    <!-- when at home position, go to base -->
+    <param name="goal_0_gotobase" value="true" />
+
+    <!-- other goals positions -->
+    <param name="goal_1_pos" value="1234567890" />
+    <param name="goal_2_pos" value="1234567890" />
+    <param name="goal_3_pos" value="1234567890" />
+
+  </node>
+
+</launch>
