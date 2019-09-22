@@ -27,6 +27,15 @@
 #include <actionlib/client/simple_action_client.h>
 #include <iostream>
 
+#include <sensor_msgs/BatteryState.h>
+sensor_msgs::BatteryState _battery_state;
+
+// Callback for receiving BatteryState messages
+void batteryStateCb(const sensor_msgs::BatteryState& bat_state)
+{
+  _battery_state = bat_state;
+}
+
 #include <pthread.h>
 pthread_t command_thread;
 
@@ -73,14 +82,14 @@ int main(int argc, char** argv)
   std::string server_name = _nh.param<std::string>("server_name", "move_base");
   ROS_INFO("using action server name: %s", server_name.c_str());
 
-  //tell the action client that we want to spin a thread by default to service this action's subscriptions.
-  //if false, then the user has to call ros::spin() themselves.
-  MoveBaseClient ac(server_name, true);
+  //no need to spin extra thread, since we will call ros::spinOnce() ourselves
+  MoveBaseClient ac(server_name, false);
 
   //wait for the action server to come up
   while(!ac.waitForServer(ros::Duration(5.0)))
   {
     ROS_INFO("...waiting for the action server to come up");
+    ros::spinOnce();
     if(!ros::ok())
       exit(2);
   }
@@ -100,6 +109,8 @@ int main(int argc, char** argv)
   // publish and subscribe under this namespace:
   ros::NodeHandle nh;
 
+  // register callback to receive battery_state messages
+  ros::Subscriber sub = nh.subscribe("battery", 10, batteryStateCb);
 
   move_base_msgs::MoveBaseGoal goal;
 
@@ -110,13 +121,13 @@ int main(int argc, char** argv)
     {
       switch(_cmd)
       {
-        case 'g': std::cout << "{goal accepted: " << goals.getName(_goal) << "}" << std::endl;
+        case 'g': std::cout << " {goal accepted: " << goals.getName(_goal) << "}" << std::endl;
                   goal.target_pose.header.frame_id = fixed_frame_id;
                   goal.target_pose.header.stamp = ros::Time::now();
                   goal.target_pose.pose = goals.getPose(_goal);
                   ac.sendGoal(goal, &doneCb, &activeCb, &feedbackCb);
                   break;
-        case 'm': std::cout << "{move accepted}" << std::endl;
+        case 'm': std::cout << " {move accepted}" << std::endl;
                   goal.target_pose.header.frame_id = base_frame_id;
                   goal.target_pose.header.stamp = ros::Time::now();
                   goal.target_pose.pose.position = _move;
@@ -126,10 +137,11 @@ int main(int argc, char** argv)
                   goal.target_pose.pose.orientation.w = 1.0;
                   ac.sendGoal(goal, &doneCb, &activeCb, &feedbackCb);
                   break;
-        case 's': std::cout << "{stop accepted}" << std::endl;
+        case 's': std::cout << " {stop accepted}" << std::endl;
                   ac.cancelAllGoals();
                   break;
-        case 'b': std::cout << "{batt accepted}" << std::endl;
+        case 'b': std::cout << " {battery is at " << (int)(_battery_state.percentage * 100) << "% ("
+                                                  << (int)_battery_state.power_supply_status << ")}" << std::endl;
                   break;
         case 'q': exit(0);
         default : break;

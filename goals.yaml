@@ -11,6 +11,9 @@ goals:
   - id: 3
     name: kitchen
     pose: [3.8, 3.4, 0, 0, 0, 0.7, 0.7]
+  - id: 4
+    name: corridor
+    pose: [6, 0.8, 0, 0, 0, 1, 0]
 
 # pose[0] = position.x
 # pose[1] = position.y

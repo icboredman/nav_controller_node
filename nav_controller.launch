@@ -10,6 +10,9 @@
     <param name="base_frame_id"  type="string" value="base_link"/>
     <param name="server_name"    type="string" value="/planner/move_base"/>
     <param name="feedback_rate_factor" type="int" value="10"/>
+
+    <remap from="battery"       to="/base_controller/battery"/>
+
   </node>
 
 </launch>
