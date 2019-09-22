@@ -1,3 +1,27 @@
+/***********************************************************************************
+ *  Navigation Controller
+ *  A ROS node that that controls a robot by sending goals to Ros Navigation Stack
+ *  and processing its feedback. Implements ActionLib Client functionality for move_base.
+ *
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * ------------------------------
+ *  boredman@BoredomProjects.net
+ * ------------------------------
+ *
+ ***********************************************************************************/
 #include <ros/ros.h>
 #include <move_base_msgs/MoveBaseAction.h>
 #include <actionlib/client/simple_action_client.h>
@@ -6,24 +30,23 @@
 #include <pthread.h>
 pthread_t command_thread;
 
-using namespace std;
-
+#include "XmlRpcGoal.h"
 
 typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> MoveBaseClient;
 
-
-void doneCb(const actionlib::SimpleClientGoalState& state, const move_base_msgs::MoveBaseResult::ConstPtr& result);
 void activeCb();
 void feedbackCb(const move_base_msgs::MoveBaseFeedback::ConstPtr& feedback);
+void doneCb(const actionlib::SimpleClientGoalState& state,
+            const move_base_msgs::MoveBaseResult::ConstPtr& result);
+
+int _feedback_rate_factor;
 
 
 void* CommandParser(void* param);
 
-//typedef enum {cmd_none, cmd_goto, cmd_move, cmd_stop, cmd_batt} t_command;
 char  _cmd;
 int   _goal;
-float _shift;
-char  _dir;
+geometry_msgs::Point _move;
 bool  _cmd_ready;
 
 
@@ -32,83 +55,91 @@ bool  _cmd_ready;
 /*********************************************************************
  * MAIN
  *********************************************************************/
-int main(int argc, char** argv){
+int main(int argc, char** argv)
+{
   ros::init(argc, argv, "nav_controller");
 
   // get parameters from private namespace:
   ros::NodeHandle _nh("~");
-//  _nh.param("usb_hwid", usb_hwid, (std::string)"16c0:0483");
 
-  //tell the action client that we want to spin a thread by default
-  MoveBaseClient ac("move_base", true);
+  XmlRpcGoal goals;
+
+  if (_nh.getParam("goals", goals) == false)
+  {
+    ROS_ERROR("Unable to get goals parameters");
+    exit(1);
+  }
+
+  std::string server_name = _nh.param<std::string>("server_name", "move_base");
+  ROS_INFO("using action server name: %s", server_name.c_str());
+
+  //tell the action client that we want to spin a thread by default to service this action's subscriptions.
+  //if false, then the user has to call ros::spin() themselves.
+  MoveBaseClient ac(server_name, true);
 
   //wait for the action server to come up
   while(!ac.waitForServer(ros::Duration(5.0)))
   {
-    ROS_INFO("...waiting for the move_base action server to come up");
+    ROS_INFO("...waiting for the action server to come up");
     if(!ros::ok())
-      exit(1);
+      exit(2);
   }
-  ROS_INFO("move_base action server is up");
+  ROS_INFO("action server is up!");
 
   //spin a thread to parse console commands
   if (pthread_create(&command_thread, NULL, &CommandParser, (void*)&_nh) != 0)
   {
     ROS_ERROR_STREAM("Couldn't create CommandParser thread");
-    exit(2);
+    exit(3);
   }
+
+  std::string fixed_frame_id = _nh.param<std::string>("fixed_frame_id", "map");
+  std::string base_frame_id  = _nh.param<std::string>("base_frame_id", "base_link");
+  _feedback_rate_factor = _nh.param<int>("feedback_rate_factor", 10);
 
   // publish and subscribe under this namespace:
   ros::NodeHandle nh;
 
 
+  move_base_msgs::MoveBaseGoal goal;
+
+  ros::Rate loop_rate(10);
   while(ros::ok())
   {
     if(_cmd_ready)
     {
       switch(_cmd)
       {
-        case 'g' : 
-                   cout << "{goal accepted}" << endl;
-                   break;
-        case 'm' : 
-                   cout << "{move accepted}" << endl;
-                   break;
-        case 's' : 
-                   cout << "{stop accepted}" << endl;
-                   break;
-        case 'b' : 
-                   cout << "{batt accepted}" << endl;
-                   break;
-        case 'q' : exit(0);
-        default  : break;
+        case 'g': std::cout << "{goal accepted: " << goals.getName(_goal) << "}" << std::endl;
+                  goal.target_pose.header.frame_id = fixed_frame_id;
+                  goal.target_pose.header.stamp = ros::Time::now();
+                  goal.target_pose.pose = goals.getPose(_goal);
+                  ac.sendGoal(goal, &doneCb, &activeCb, &feedbackCb);
+                  break;
+        case 'm': std::cout << "{move accepted}" << std::endl;
+                  goal.target_pose.header.frame_id = base_frame_id;
+                  goal.target_pose.header.stamp = ros::Time::now();
+                  goal.target_pose.pose.position = _move;
+                  goal.target_pose.pose.orientation.x = 0.0;
+                  goal.target_pose.pose.orientation.y = 0.0;
+                  goal.target_pose.pose.orientation.z = 0.0;
+                  goal.target_pose.pose.orientation.w = 1.0;
+                  ac.sendGoal(goal, &doneCb, &activeCb, &feedbackCb);
+                  break;
+        case 's': std::cout << "{stop accepted}" << std::endl;
+                  ac.cancelAllGoals();
+                  break;
+        case 'b': std::cout << "{batt accepted}" << std::endl;
+                  break;
+        case 'q': exit(0);
+        default : break;
       }
       _cmd_ready = false;
     }
 
     ros::spinOnce();
+    loop_rate.sleep();
   }
-
-/*
-  move_base_msgs::MoveBaseGoal goal;
-
-  //we'll send a goal to the robot to move 1 meter forward
-  goal.target_pose.header.frame_id = "base_link";
-  goal.target_pose.header.stamp = ros::Time::now();
-
-  goal.target_pose.pose.position.x = 1.0;
-  goal.target_pose.pose.orientation.w = 1.0;
-
-  ROS_INFO("Sending goal");
-  ac.sendGoal(goal, &doneCb, &activeCb, &feedbackCb);
-
-  ac.waitForResult();
-
-  if(ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
-    ROS_INFO("Hooray, the base moved 1 meter forward");
-  else
-    ROS_INFO("The base failed to move forward 1 meter for some reason");
-*/
 
   return 0;
 }
@@ -116,32 +147,34 @@ int main(int argc, char** argv){
 
 
 
-
-
-
 /*********************************************************************
  * ActionLib callbacks
  *********************************************************************/
-// Called once when the goal completes
-void doneCb(const actionlib::SimpleClientGoalState& state,
-            const move_base_msgs::MoveBaseResult::ConstPtr& result)
-{
-  ROS_INFO("Finished in state [%s]", state.toString().c_str());
-//  ROS_INFO("Answer: %i", result->sequence.back());
-}
-
 // Called once when the goal becomes active
 void activeCb()
 {
-  ROS_INFO("Goal just went active");
+  std::cout << " <Goal just went active>" << std::endl;
 }
 
 // Called every time feedback is received for the goal
 void feedbackCb(const move_base_msgs::MoveBaseFeedback::ConstPtr& feedback)
 {
-//  ROS_INFO("Got Feedback of length %lu", feedback->sequence.size());
+  static int counter = 0;
+  if (counter++ >= _feedback_rate_factor)
+  {
+    counter = 0;
+    std::cout << " <feedback of current position: x=" << feedback->base_position.pose.position.x << 
+                                               ", y=" << feedback->base_position.pose.position.y << std::endl;
+  }
 }
 
+// Called once when the goal completes
+void doneCb(const actionlib::SimpleClientGoalState& state,
+            const move_base_msgs::MoveBaseResult::ConstPtr& result)
+{
+  std::cout << " <Finished in state [" << state.toString().c_str() << "]" << std::endl;
+  // result seems to be unused in move_base
+}
 
 
 
@@ -152,68 +185,107 @@ void feedbackCb(const move_base_msgs::MoveBaseFeedback::ConstPtr& feedback)
 void* CommandParser(void* param)
 {
   ROS_DEBUG_STREAM("Command parser thread started");
-//  ros::NodeHandle *nh = (ros::NodeHandle*)param;
+  ros::NodeHandle *nh = (ros::NodeHandle*)param;
 
   _cmd_ready = false;
-  cout << endl;
+  std::cout << std::endl;
 
+  ros::Rate loop_rate(100);
   while(ros::ok())
   {
-    if(_cmd_ready)
-    {
-      ros::Duration(0.1).sleep();
-      continue;
-    }
+    loop_rate.sleep();
 
-    if(!(cin >> _cmd))
+    if(_cmd_ready)
+      continue;
+
+    if(!(std::cin >> _cmd))
     {
-      cin.clear();
-      cin.ignore();
-      cout << " <command error>" << endl;
-      _cmd = 0;
+      std::cin.clear();
+      std::cin.ignore();
+      std::cout << " <command error>" << std::endl;
+      continue;
     }
 
     switch(_cmd)
     {
-      case 'g' : if(!(cin >> _goal))
-                 {
-                   cin.clear();
-                   cin.ignore();
-                   cout << " <goal number error>" << endl;
-                   _cmd = 0;
-                 }
-                 break;
-      case 's' : break;
-      case 'm' : if(!(cin >> _shift))
-                 {
-                   cin.clear();
-                   cin.ignore();
-                   cout << " <move shift error>" << endl;
-                   _cmd = 0;
-                 }
-                 if(!(cin >> _dir))
-                 {
-                   cin.clear();
-                   cin.ignore();
-                   cout << " <move axis error>" << endl;
-                   _cmd = 0;
-                 }
-                 break;
-      case 'b' : break;
-      case 'q' : break;
-      case 'h' : cout << " |commands: g - goal [number]" << endl;
-                 cout << " |          s - stop" << endl;
-                 cout << " |          m - move [meters] [axis (x or y)]" << endl;
-                 cout << " |          b - battery" << endl;
-                 cout << " |          h - help" << endl;
-                 cout << " |          q - quit" << endl;
-                 _cmd = 0;
-                 break;
-      default  : cout << " <unknown command>" << endl;
-                 _cmd = 0;
-                 break;
+      case 'g': if(!(std::cin >> _goal))
+                {
+                  std::cin.clear();
+                  std::cin.ignore();
+                  std::cout << " <goal number error>" << std::endl;
+                  break;
+                }
+                _cmd_ready = true;
+                break;
+
+      case 's': _cmd_ready = true;
+                break;
+
+      case 'm': float shift;
+                if(!(std::cin >> shift))
+                {
+                  std::cin.clear();
+                  std::cin.ignore();
+                  std::cout << " <move shift error>" << std::endl;
+                  break;
+                }
+                char dir;
+                if(!(std::cin >> dir))
+                {
+                  std::cin.clear();
+                  std::cin.ignore();
+                  std::cout << " <move direction type error>" << std::endl;
+                  break;
+                }
+                if(dir == 'f')
+                {
+                  _move.x = shift;
+                  _move.y = 0.0;
+                }
+                else if(dir == 'b')
+                {
+                  _move.x = -shift;
+                  _move.y = 0.0;
+                }
+                else if(dir == 'l')
+                {
+                  _move.x = 0.0;
+                  _move.y = shift;
+                }
+                else if(dir == 'r')
+                {
+                  _move.x = 0.0;
+                  _move.y = -shift;
+                }
+                else
+                {
+                  std::cin.clear();
+                  std::cin.ignore();
+                  std::cout << " <move direction list error>" << std::endl;
+                  break;
+                }
+                _move.z = 0.0;
+                _cmd_ready = true;
+                break;
+
+      case 'b': 
+                _cmd_ready = true;
+                break;
+
+      case 'q': _cmd_ready = true;
+                break;
+
+      case 'h': std::cout << " |commands: g - goal [number]" << std::endl;
+                std::cout << " |          s - stop" << std::endl;
+                std::cout << " |          m - move [meters] [direction (f, b, l or r)]" << std::endl;
+                std::cout << " |          b - battery" << std::endl;
+                std::cout << " |          h - help" << std::endl;
+                std::cout << " |          q - quit" << std::endl;
+                break;
+
+      default : std::cout << " <unknown command>" << std::endl;
+                break;
     }
-    _cmd_ready = true;
   }
 
 }
