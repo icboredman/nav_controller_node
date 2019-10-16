@@ -13,6 +13,14 @@
 
     <remap from="battery"       to="/base_controller/battery"/>
 
+    <param name="voice_input_dev" type="string" value="default:CARD=Device"/>
+    <param name="model_path"      type="string" value="/usr/local/share/pocketsphinx/model/en-us/en-us"/>
+    <param name="dictionary_file" type="string" value="/home/boredman/Documents/cherokey_ws/src/nav_controller_node/sphinx/2865.dic"/>
+    <param name="kws_name"        type="string" value="HEISENBERG"/>
+    <param name="kws_threshold"   type="double" value="1e-50"/>
+    <param name="grammar_file"    type="string" value="/home/boredman/Documents/cherokey_ws/src/nav_controller_node/sphinx/grammar.jsgf"/>
+
+    <param name="voice_output_dev" type="string" value="default:CARD=chtrt5645"/>
   </node>
 
 </launch>

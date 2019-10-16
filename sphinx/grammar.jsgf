@@ -1,0 +1,14 @@
+#JSGF V1.0;
+
+grammar robot;
+
+<place> = HOME | TO THE OFFICE | TO THE LIVINGROOM | TO THE KITCHEN | TO THE CORRIDOR ;
+<go> = GO <place> ;
+
+<number> = ONE | HALF A | TWO | THREE ;
+<dir> = FORWARD | BACKWARDS ;
+<move> = MOVE <number> (METER | METERS) <dir> ;
+
+<turn> = TURN (AROUND | RIGHT | LEFT) ;
+
+public <rules> = <go> | <move> | <turn> | STOP ; 

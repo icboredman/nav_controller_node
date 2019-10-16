@@ -27,6 +27,10 @@
 #include <actionlib/client/simple_action_client.h>
 #include <iostream>
 
+#include <sphinxbase/err.h>
+#include <sphinxbase/ad.h>
+#include <pocketsphinx.h>
+
 #include <sensor_msgs/BatteryState.h>
 sensor_msgs::BatteryState _battery_state;
 
@@ -37,7 +41,11 @@ void batteryStateCb(const sensor_msgs::BatteryState& bat_state)
 }
 
 #include <pthread.h>
-pthread_t command_thread;
+pthread_t console_cmd_thread, voice_cmd_thread;
+
+void* ConsoleCmdParser(void* param);
+void* VoiceCmdParser(void* param);
+
 
 #include "XmlRpcGoal.h"
 
@@ -50,8 +58,6 @@ void doneCb(const actionlib::SimpleClientGoalState& state,
 
 int _feedback_rate_factor;
 
-
-void* CommandParser(void* param);
 
 char  _cmd;
 int   _goal;
@@ -82,6 +88,16 @@ int main(int argc, char** argv)
   std::string server_name = _nh.param<std::string>("server_name", "move_base");
   ROS_INFO("using action server name: %s", server_name.c_str());
 
+//-------------
+  //spin a thread to process voice commands
+  if (pthread_create(&voice_cmd_thread, NULL, &VoiceCmdParser, (void*)&_nh) != 0)
+  {
+    ROS_ERROR_STREAM("Couldn't create ConsoleCmdParser thread");
+    exit(3);
+  }
+
+//-------------
+
   //no need to spin extra thread, since we will call ros::spinOnce() ourselves
   MoveBaseClient ac(server_name, false);
 
@@ -96,9 +112,9 @@ int main(int argc, char** argv)
   ROS_INFO("action server is up!");
 
   //spin a thread to parse console commands
-  if (pthread_create(&command_thread, NULL, &CommandParser, (void*)&_nh) != 0)
+  if (pthread_create(&console_cmd_thread, NULL, &ConsoleCmdParser, (void*)&_nh) != 0)
   {
-    ROS_ERROR_STREAM("Couldn't create CommandParser thread");
+    ROS_ERROR_STREAM("Couldn't create ConsoleCmdParser thread");
     exit(3);
   }
 
@@ -194,7 +210,7 @@ void doneCb(const actionlib::SimpleClientGoalState& state,
 /**************************************************************
  * Thread to parse console command lines
  **************************************************************/
-void* CommandParser(void* param)
+void* ConsoleCmdParser(void* param)
 {
   ROS_DEBUG_STREAM("Command parser thread started");
   ros::NodeHandle *nh = (ros::NodeHandle*)param;
@@ -210,6 +226,7 @@ void* CommandParser(void* param)
     if(_cmd_ready)
       continue;
 
+    // block while waiting for input
     if(!(std::cin >> _cmd))
     {
       std::cin.clear();
@@ -280,7 +297,7 @@ void* CommandParser(void* param)
                 _cmd_ready = true;
                 break;
 
-      case 'b': 
+      case 'b':
                 _cmd_ready = true;
                 break;
 
@@ -301,4 +318,141 @@ void* CommandParser(void* param)
   }
 
 }
+
+
+
+
+/**************************************************************
+ * Thread to process voice commands
+ **************************************************************/
+void* VoiceCmdParser(void* param)
+{
+  ROS_DEBUG_STREAM("Voice processing thread started");
+  ros::NodeHandle *nh = (ros::NodeHandle*)param;
+
+  ps_decoder_t *ps = NULL;
+  cmd_ln_t *config = NULL;
+  ad_rec_t *ad = NULL;
+  int16 adbuf[2048];
+  uint8 utt_started, in_speech;
+  int32 k;
+  char const *hyp;
+
+  config = cmd_ln_init(NULL, ps_args(), TRUE,
+                       "-hmm",  nh->param<std::string>("model_path", "").c_str(),
+                       "-dict", nh->param<std::string>("dictionary_file", "").c_str(),
+                       "-logfn", "/dev/null",
+                       NULL);
+
+//  config = cmd_ln_parse_r(NULL, cont_args_def, argc, argv, FALSE);
+//  cmd_ln_set_str_r(config, "-adcdev", nh->param<std::string>("voice_input_dev", "default:CARD=Device").c_str());
+//  cmd_ln_set_str_r(config, "-dict", nh->param<std::string>("dictionary_file", "file.dic").c_str());
+//  cmd_ln_set_float_r(config, "-kws_threshold", nh->param<double>("kws_threshold", 1e-50));
+
+  if ((ps = ps_init(config)) == NULL)
+  {
+    cmd_ln_free_r(config);
+    ROS_ERROR_STREAM("ps_init failed");
+    cmd_ln_free_r(config);
+    return NULL;
+  }
+
+  std::string my_name = nh->param<std::string>("kws_name", "robot");
+  ps_set_keyphrase(ps, "kws", my_name.c_str());
+
+  ps_set_jsgf_file(ps, "jsgf", nh->param<std::string>("grammar_file", "file.jsgf").c_str());
+  ps_set_fsg(ps, "fsg", ps_get_fsg(ps, "jsgf"));  // define grammar
+
+//  ps_set_search(ps, "kws");
+  ps_set_search(ps, "fsg");
+
+  if ((ad = ad_open_dev(nh->param<std::string>("voice_input_dev", "sysdefault").c_str(),
+                        (int)cmd_ln_float32_r(config,"-samprate"))) == NULL)
+    ROS_ERROR_STREAM("Failed to open audio device");
+  if (ad_start_rec(ad) < 0)
+    ROS_ERROR_STREAM("Failed to start recording");
+  if (ps_start_utt(ps) < 0)
+    ROS_ERROR_STREAM("Failed to start utterance");
+
+  utt_started = FALSE;
+  ROS_INFO_STREAM("Ready....");
+
+  _cmd_ready = false;
+  std::cout << std::endl;
+
+  while(ros::ok())
+  {
+    if(_cmd_ready)
+      continue;
+
+    if ((k = ad_read(ad, adbuf, 2048)) < 0)
+      ROS_ERROR_STREAM("Failed to read audio");
+    ps_process_raw(ps, adbuf, k, FALSE, FALSE);
+    in_speech = ps_get_in_speech(ps);
+    if (in_speech && !utt_started)
+    {
+      utt_started = TRUE;
+      ROS_INFO_STREAM("Listening...");
+    }
+    if (!in_speech && utt_started)
+    { // speech -> silence transition, time to start new utterance
+      ps_end_utt(ps);
+      hyp = ps_get_hyp(ps, NULL);
+      if (hyp != NULL)
+      {
+        std::cout << hyp << std::endl;
+      }
+
+      if (ps_start_utt(ps) < 0)
+        ROS_ERROR_STREAM("Failed to start utterance");
+      utt_started = FALSE;
+      ROS_INFO_STREAM("Ready....");
+    }
+
+    ros::Duration(0.1).sleep();
+  }
+
+  ad_close(ad);
+  ps_free(ps);
+  cmd_ln_free_r(config);
+}
+
+
+/*
+static const arg_t cont_args_def[] = {
+    POCKETSPHINX_OPTIONS,
+    { "-adcdev",
+      ARG_STRING,
+      "default:CARD=Device",
+      "Name of audio device to use for input."},
+//    { "-lm",
+//      ARG_STRING,
+//      "",
+//      "Word trigram language model input file"},
+    { "-alignctl",	// only here to supress error message
+      ARG_STRING,
+      NULL,
+      "Control file listing transcript files to force-align to utts" },
+    CMDLN_EMPTY_OPTION
+};
+
+    ps_decoder_t *ps = NULL;
+    cmd_ln_t *config = NULL;
+
+    config = cmd_ln_parse_r(NULL, cont_args_def, 0, NULL, TRUE);
+//    ROS_INFO("hmm: %s", (char*)(cmd_ln_access_r(config, "-hmm")->ptr));
+//    cmd_ln_set_str_r(config, "-adcdev", "default:CARD=Device");
+    ps_default_search_args(config);
+    err_set_logfp(NULL);
+    if ((ps = ps_init(config)) == NULL)
+    {
+      cmd_ln_free_r(config);
+      return 1;
+    }
+//    ROS_INFO("dev: %s", (char*)cmd_ln_str_r(config, "-adcdev"));
+
+    ps_set_keyphrase(ps, "kws", "heisenberg");
+    ps_set_search(ps, "kws");
+
+*/
 
