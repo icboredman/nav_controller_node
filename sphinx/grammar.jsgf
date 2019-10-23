@@ -11,4 +11,4 @@ grammar robot;
 
 <turn> = TURN (AROUND | RIGHT | LEFT) ;
 
-public <rules> = <go> | <move> | <turn> | STOP ; 
+public <rules> = <go> | <move> | <turn> | STOP ;

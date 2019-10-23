@@ -1,19 +1,72 @@
+commands:
+  - id: g
+    name: GO
+  - id: m
+    name: MOVE
+  - id: t
+    name: TURN
+  - id: s
+    name: STOP
+  - id: b
+    name: BATTERY
+
 goals:
   - id: 0
-    name: home
-    pose: [-1, -1, 0, 0, 0, -0.7, 0.7]
+    name: HOME
+    pose: [-1, -1, 0, 0, 0, -0.7071, 0.7071]
   - id: 1
-    name: office
+    name: OFFICE
     pose: [-0.5, -0.5, 0, 0, 0, 0, 1]
   - id: 2
-    name: livingroom
-    pose: [-1, 3, 0, 0, 0, -0.7, 0.7]
+    name: LIVINGROOM
+    pose: [-1, 3, 0, 0, 0, -0.7071, 0.7071]
   - id: 3
-    name: kitchen
-    pose: [3.8, 3.4, 0, 0, 0, 0.7, 0.7]
+    name: KITCHEN
+    pose: [3.8, 3.4, 0, 0, 0, 0.7071, 0.7071]
   - id: 4
-    name: corridor
+    name: CORRIDOR
     pose: [6, 0.8, 0, 0, 0, 1, 0]
+
+numbers:
+  - id: 0
+    name: HALF
+    value: 0.5
+  - id: 1
+    name: ONE
+    value: 1.0
+  - id: 2
+    name: TWO
+    value: 2.0
+  - id: 3
+    name: THREE
+    value: 3.0
+
+moves:
+  - id: f
+    name: FORWARD
+    pose: [1, 0, 0, 0, 0, 0, 1]
+  - id: b
+    name: BACKWARDS
+    pose: [-1, 0, 0, 0, 0, 0, 1]
+  - id: l
+    name: LEFT
+    pose: [0, 1, 0, 0, 0, 0, 1]
+  - id: r
+    name: RIGHT
+    pose: [0, -1, 0, 0, 0, 0, 1]
+
+turns:
+  - id: a
+    name: AROUND
+    pose: [0, 0, 0, 0, 0, 1, 0]
+  - id: l
+    name: LEFT
+    pose: [0, 0, 0, 0, 0, 0.7071, 0.7071]
+  - id: r
+    name: RIGHT
+    pose: [0, 0, 0, 0, 0, -0.7071, 0.7071]
+
+
 
 # pose[0] = position.x
 # pose[1] = position.y

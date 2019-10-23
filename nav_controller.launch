@@ -2,23 +2,29 @@
     Launcher for rtabmap navigation controlled by nav_controller_node
 -->
 <launch>
+  <master auto="start"/>
+  <env name="ROSCONSOLE_CONFIG_FILE"
+       value="$(find nav_controller)/custom_rosconsole.config"/>
+
+  <include file="$(find nav_rtabmap)/rtab_move.launch" />
+
   <node pkg="nav_controller" type="nav_controller_node" name="nav_controller"
         respawn="true"
         output="screen">
     <rosparam file="$(find nav_controller)/goals.yaml" command="load"/>
-    <param name="fixed_frame_id" type="string" value="map"/>
-    <param name="base_frame_id"  type="string" value="base_link"/>
-    <param name="server_name"    type="string" value="/planner/move_base"/>
-    <param name="feedback_rate_factor" type="int" value="10"/>
+    <param name="fixed_frame_id"        type="string" value="map"/>
+    <param name="base_frame_id"         type="string" value="base_link"/>
+    <param name="actionlib_server_name" type="string" value="/planner/move_base"/>
+    <param name="feedback_rate_factor"  type="int"    value="10"/>
 
-    <remap from="battery"       to="/base_controller/battery"/>
+    <remap from="battery"         to="/base_controller/battery"/>
 
     <param name="voice_input_dev" type="string" value="default:CARD=Device"/>
     <param name="model_path"      type="string" value="/usr/local/share/pocketsphinx/model/en-us/en-us"/>
-    <param name="dictionary_file" type="string" value="/home/boredman/Documents/cherokey_ws/src/nav_controller_node/sphinx/2865.dic"/>
+    <param name="dictionary_file" type="string" value="$(find nav_controller)/sphinx/2865.dic"/>
     <param name="kws_name"        type="string" value="HEISENBERG"/>
     <param name="kws_threshold"   type="double" value="1e-50"/>
-    <param name="grammar_file"    type="string" value="/home/boredman/Documents/cherokey_ws/src/nav_controller_node/sphinx/grammar.jsgf"/>
+    <param name="grammar_file"    type="string" value="$(find nav_controller)/sphinx/grammar.jsgf"/>
 
     <param name="voice_output_dev" type="string" value="default:CARD=chtrt5645"/>
   </node>
