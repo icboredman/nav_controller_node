@@ -6,9 +6,15 @@ grammar robot;
 <go> = GO <place> ;
 
 <number> = ONE | HALF A | TWO | THREE ;
-<dir> = FORWARD | BACKWARDS ;
+<dir> = FORWARD | BACKWARDS | LEFT | RIGHT ;
 <move> = MOVE <number> (METER | METERS) <dir> ;
 
 <turn> = TURN (AROUND | RIGHT | LEFT) ;
 
-public <rules> = <go> | <move> | <turn> | STOP ;
+<battery> = BATTERY ( LEVEL | STATE )* ;
+<name> = WHAT IS YOUR NAME ;
+<time> = WHAT TIME IS IT ;
+<voice> = BE QUIET | VOICE ON ;
+<come> = COME HERE ;
+
+public <rules> = <go> | <move> | <turn> | STOP | <battery> | <name> | <time> | <voice> | <come> ;

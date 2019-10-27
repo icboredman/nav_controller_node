@@ -9,6 +9,12 @@ commands:
     name: STOP
   - id: b
     name: BATTERY
+  - id: i
+    name: TIME
+  - id: n
+    name: NAME
+  - id: c
+    name: COME
 
 goals:
   - id: 0

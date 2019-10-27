@@ -20,13 +20,13 @@
     <remap from="battery"         to="/base_controller/battery"/>
 
     <param name="voice_input_dev" type="string" value="default:CARD=Device"/>
-    <param name="model_path"      type="string" value="/usr/local/share/pocketsphinx/model/en-us/en-us"/>
-    <param name="dictionary_file" type="string" value="$(find nav_controller)/sphinx/2865.dic"/>
-    <param name="kws_name"        type="string" value="HEISENBERG"/>
-    <param name="kws_threshold"   type="double" value="1e-50"/>
+    <param name="model_path"      type="string" value="$(find nav_controller)/sphinx/model/en-us/en-us-adapt"/>
+    <param name="dictionary_file" type="string" value="$(find nav_controller)/sphinx/4557/4557.dic"/>
+    <param name="keyphrase_file"  type="string" value="$(find nav_controller)/sphinx/keyphrase.list"/>
     <param name="grammar_file"    type="string" value="$(find nav_controller)/sphinx/grammar.jsgf"/>
 
-    <param name="voice_output_dev" type="string" value="default:CARD=chtrt5645"/>
+    <param name="speach_output_dev" type="string" value="default:CARD=chtrt5645"/>
+    <param name="speach_voice_name" type="string" value="mb-en1"/>
   </node>
 
 </launch>

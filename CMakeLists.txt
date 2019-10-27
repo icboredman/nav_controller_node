@@ -20,6 +20,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SPHINX REQUIRED pocketsphinx sphinxbase)
+pkg_check_modules(ESPEAK REQUIRED espeak-ng)
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -123,6 +124,7 @@ include_directories(
 # include
   ${catkin_INCLUDE_DIRS}
   ${SPHINX_INCLUDE_DIRS}
+  ${ESPEAK_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
@@ -154,6 +156,7 @@ add_executable(${PROJECT_NAME}_node src/nav_controller_node.cpp)
 target_link_libraries(${PROJECT_NAME}_node
   ${catkin_LIBRARIES}
   ${SPHINX_LIBRARIES}
+  ${ESPEAK_LIBRARIES}
 )
 
 #############

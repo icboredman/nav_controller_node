@@ -25,6 +25,9 @@
 #include <iostream>       // std::cout
 #include <atomic>         // std::atomic, std::atomic_flag, ATOMIC_FLAG_INIT
 #include <thread>         // std::thread, std::this_thread::yield
+#include <fstream>        // ifstream
+#include <iomanip>        //
+#include <ctime>          //
 #include <ros/ros.h>
 #include <move_base_msgs/MoveBaseAction.h>
 #include <actionlib/client/simple_action_client.h>
@@ -33,6 +36,11 @@
 #include <sphinxbase/err.h>
 #include <sphinxbase/ad.h>
 #include <pocketsphinx.h>
+
+#include <espeak-ng/espeak_ng.h>
+int  SpeachInit(const char *devicename, const char *voicename);
+void Speak(const char *phrase);
+std::atomic_bool speaking_(false);
 
 #include "XmlRpcGoal.h"
 
@@ -90,6 +98,12 @@ int main(int argc, char** argv)
   // register callback to receive battery_state messages
   ros::Subscriber sub = nh.subscribe("battery", 10, batteryStateCb);
 
+  if (0 != SpeachInit(_nh.param<std::string>("speach_output_dev", "").c_str(),
+                      _nh.param<std::string>("speach_voice_name", "").c_str()) )
+  {
+    exit(1);
+  }
+
   //no need to spin extra thread, since we will call ros::spinOnce() ourselves
   MoveBaseClient ac(server_name, false);
 
@@ -103,10 +117,26 @@ int main(int argc, char** argv)
   }
   ROS_INFO("action server is up!");
 
+  std::string my_name = _nh.param<std::string>("keyphrase_file", "kws.list");
+  std::ifstream kws_file (my_name);
+  if (kws_file.is_open())
+  {
+    getline(kws_file, my_name, ' ');
+    kws_file.close();
+  }
+  else
+  {
+    ROS_ERROR("Unable to read my name from keyphrase file: %s", my_name.c_str());
+    exit(3);
+  }
+
   //spin a thread to parse console commands
   std::thread console_cmd_thread (ConsoleCmdParser, std::ref(_nh));
   //spin a thread to process voice commands
   std::thread voice_cmd_thread (VoiceCmdParser, std::ref(_nh));
+
+  std::string phrase = "Hello World! My name is " + my_name;
+  Speak(phrase.c_str());
 
   move_base_msgs::MoveBaseGoal goal;
 
@@ -121,26 +151,49 @@ int main(int argc, char** argv)
                   goal.target_pose.header.frame_id = fixed_frame_id;
                   goal.target_pose.header.stamp = ros::Time::now();
                   goal.target_pose.pose = target_pose_;
-                  //ac.sendGoal(goal, &doneCb, &activeCb, &feedbackCb);
+                  phrase = "Ok. " + target_name_;
+                  Speak(phrase.c_str());
+//                  ac.sendGoal(goal, &doneCb, &activeCb, &feedbackCb);
                   break;
         case 't':
         case 'm': std::cout << " {move accepted: " << target_name_ << "}" << std::endl;
                   goal.target_pose.header.frame_id = base_frame_id;
                   goal.target_pose.header.stamp = ros::Time::now();
                   goal.target_pose.pose = target_pose_;
-                  //ac.sendGoal(goal, &doneCb, &activeCb, &feedbackCb);
+                  phrase = (cmd_=='t' ? "Turning " : "Moving ") + target_name_;
+                  Speak(phrase.c_str());
+//                  ac.sendGoal(goal, &doneCb, &activeCb, &feedbackCb);
                   break;
         case 's': std::cout << " {stop accepted}" << std::endl;
+                  phrase = "Fine.";
+                  Speak(phrase.c_str());
                   ac.cancelAllGoals();
                   break;
         case 'b': std::cout << " {battery is at " << (int)(battery_state_.percentage * 100) << "% ("
                                                   << (int)battery_state_.power_supply_status << ")}" << std::endl;
+                  phrase = "Battery is at " + std::to_string((int)(battery_state_.percentage * 100)) + "%";
+                  Speak(phrase.c_str());
+                  break;
+        case 'i': { std::time_t tm = std::time(nullptr);
+                  std::stringstream stm;
+                  stm << std::put_time(std::localtime(&tm), "%A, %B %e, %Y, %I:%M %p");
+                  std::cout << " {The time is " << stm.str() << "}" << std::endl;
+                  phrase = "The time is " + stm.str();
+                  Speak(phrase.c_str()); }
+                  break;
+        case 'n': phrase = "My name, is " + my_name;
+                  Speak(phrase.c_str());
+                  break;
+        case 'c': phrase = "No! You come here!";
+                  Speak(phrase.c_str());
                   break;
         case 'q': stop_threads_ = true;
                   console_cmd_thread.join();
                   voice_cmd_thread.join();
                   return 0;
         case '?':
+                  phrase = "What?";
+                  Speak(phrase.c_str());
         default : break;
       }
       cmd_ready_ = false;
@@ -150,6 +203,7 @@ int main(int argc, char** argv)
     loop_rate.sleep();
   }
 
+  espeak_ng_Terminate();
   stop_threads_ = true;
   console_cmd_thread.join();
   voice_cmd_thread.join();
@@ -395,6 +449,7 @@ void VoiceCmdParser(ros::NodeHandle& nh)
   config = cmd_ln_init(NULL, ps_args(), TRUE,
                        "-hmm",  nh.param<std::string>("model_path", "").c_str(),
                        "-dict", nh.param<std::string>("dictionary_file", "").c_str(),
+//                       "-kws_threshold", nh.param<std::string>("kws_threshold", "1e-20").c_str(),
                        "-logfn", "/dev/null",
                        NULL);
 
@@ -407,8 +462,10 @@ void VoiceCmdParser(ros::NodeHandle& nh)
     return;
   }
 
-  std::string my_name = nh.param<std::string>("kws_name", "robot");
-  ps_set_keyphrase(ps, "kws", my_name.c_str());
+//  std::string my_name = nh.param<std::string>("kws_name", "robot");
+//  ps_set_keyphrase(ps, "kws", my_name.c_str());
+  std::string kws_file = nh.param<std::string>("keyphrase_file", "kws.list");
+  ps_set_kws(ps, "kws", kws_file.c_str());
 
   ps_set_jsgf_file(ps, "jsgf", nh.param<std::string>("grammar_file", "file.jsgf").c_str());
   ps_set_fsg(ps, "fsg", ps_get_fsg(ps, "jsgf"));  // define grammar
@@ -456,7 +513,7 @@ void VoiceCmdParser(ros::NodeHandle& nh)
       ROS_ERROR_STREAM("Failed to read audio");
     ps_process_raw(ps, adbuf, k, FALSE, FALSE);
     in_speech = ps_get_in_speech(ps);
-    if (in_speech && !utt_started)
+    if (in_speech && !utt_started && !speaking_)
     {
       utt_started = TRUE;
       ROS_INFO_STREAM("Listening...");
@@ -468,13 +525,14 @@ void VoiceCmdParser(ros::NodeHandle& nh)
       if (hyp != NULL)
       { // we have a hypothesis
         ROS_INFO("Hypothesis: %s", hyp);
-        if (kws && strstr(hyp, my_name.c_str()) != NULL)
+        if (kws)
         {
           ps_set_search(ps, "fsg");
           ROS_DEBUG_STREAM("Switched to FSG mode");
           kws = false;
+          silence_counter = 0;
         }
-        else if (!kws)
+        else
         { // check each action
           char *hyp_copy = strdup(hyp);   // must use free() at the end
           char *token = strtok(hyp_copy, " ");
@@ -548,11 +606,27 @@ void VoiceCmdParser(ros::NodeHandle& nh)
             cmd_ready_ = true;
           }
 
+          else if (strstr(hyp, commands.getName('i').c_str()) != NULL)
+          { // found 'TIME'
+            cmd_ = 'i';
+            cmd_ready_ = true;
+          }
+
+          else if (strstr(hyp, commands.getName('n').c_str()) != NULL)
+          { // found 'NAME'
+            cmd_ = 'n';
+            cmd_ready_ = true;
+          }
+
+          else if (commands.getName('c').compare(token) == 0)
+          { // found 'COME'
+            cmd_ = 'c';
+            cmd_ready_ = true;
+          }
+
           else
           { // WTF?
             ROS_DEBUG("unrecognized command: %s", token);
-            cmd_ = '?';
-            cmd_ready_ = true;
           }
 
           free(hyp_copy);
@@ -565,12 +639,17 @@ void VoiceCmdParser(ros::NodeHandle& nh)
       if (ps_start_utt(ps) < 0)
         ROS_ERROR_STREAM("Failed to start utterance");
       utt_started = FALSE;
-      ROS_DEBUG_STREAM("Ready....");
-      silence_counter = 0;
+      ROS_INFO_STREAM("Ready....");
     }
     if (!in_speech && !utt_started && !kws)
     {
-      if (++silence_counter > 30)   // approx. 3 sec
+      silence_counter++;
+      if (silence_counter == 30)   // after first 3 sec
+      {
+        cmd_ = '?';
+        cmd_ready_ = true;
+      }
+      else if (silence_counter > 60)   // after another 3 sec
       {
         silence_counter = 0;
         ps_end_utt(ps);
@@ -590,4 +669,70 @@ void VoiceCmdParser(ros::NodeHandle& nh)
   cmd_ln_free_r(config);
   ROS_DEBUG_STREAM("Voice processing thread received command to terminate");
 }
+
+
+
+
+/**************************************************************
+ * Text to Speach
+ **************************************************************/
+
+int EspeakSynthCallback(short *wav, int numsamples, espeak_EVENT *events)
+{
+  if (events->type == espeakEVENT_SENTENCE)
+    speaking_ = true;
+  else if (events->type == espeakEVENT_MSG_TERMINATED)
+    speaking_ = false;
+  // Callback returns: 0=continue synthesis,  1=abort synthesis.
+  return 0;
+}
+
+
+int SpeachInit(const char *devicename, const char *voicename)
+{
+  espeak_ng_InitializePath(NULL);
+  espeak_ng_ERROR_CONTEXT context = NULL;
+  if (ENS_OK != espeak_ng_Initialize(&context))
+  {
+    ROS_ERROR("Espeak-ng initialization error");
+    return -1;
+  }
+  else
+  {
+    const char *path_data;
+    const char *version = espeak_Info(&path_data);
+    ROS_INFO("Espeak-ng text-to-speech: %s  Data at: %s\n", version, path_data);
+  }
+
+  if (ENS_OK != espeak_ng_InitializeOutput(ENOUTPUT_MODE_SPEAK_AUDIO, 0, devicename))
+  {
+    ROS_ERROR("Espeak-ng output init error");
+    return -2;
+  }
+
+  espeak_SetSynthCallback(EspeakSynthCallback);
+
+  if (EE_OK != espeak_SetVoiceByName(voicename))
+  {
+    ROS_ERROR("Espeak voice name error");
+    return -3;
+  }
+
+  espeak_SetParameter(espeakRATE, 100, 0);
+  espeak_SetParameter(espeakVOLUME, 60, 0);
+  espeak_SetParameter(espeakPITCH, 70, 0);
+  espeak_SetParameter(espeakRANGE, 90, 0);
+
+  return 0;
+}
+
+
+void Speak(const char *phrase)
+{
+  int synth_flags = espeakCHARS_AUTO | espeakPHONEMES | espeakENDPAUSE;
+
+  if (EE_OK != espeak_Synth(phrase, strlen(phrase)+1, 0, POS_CHARACTER, 0, synth_flags, NULL, NULL))
+    ROS_ERROR("Espeak synth error");
+}
+
 
