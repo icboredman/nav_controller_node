@@ -27,7 +27,8 @@
 #include <thread>         // std::thread, std::this_thread::yield
 #include <fstream>        // ifstream
 #include <iomanip>        //
-#include <ctime>          //
+#include <ctime>          // time formatting
+
 #include <ros/ros.h>
 #include <move_base_msgs/MoveBaseAction.h>
 #include <actionlib/client/simple_action_client.h>
@@ -39,7 +40,7 @@
 
 #include <espeak-ng/espeak_ng.h>
 int  SpeachInit(const char *devicename, const char *voicename);
-void Speak(const char *phrase);
+void Speak(const char *phrase, bool wait_finished = false);
 std::atomic_bool speaking_(false);
 
 #include "XmlRpcGoal.h"
@@ -140,6 +141,8 @@ int main(int argc, char** argv)
 
   move_base_msgs::MoveBaseGoal goal;
 
+  int low_bat_announce = 0;
+
   ros::Rate loop_rate(10);
   while(ros::ok() && !stop_threads_)
   {
@@ -152,8 +155,8 @@ int main(int argc, char** argv)
                   goal.target_pose.header.stamp = ros::Time::now();
                   goal.target_pose.pose = target_pose_;
                   phrase = "Ok. " + target_name_;
-                  Speak(phrase.c_str());
-//                  ac.sendGoal(goal, &doneCb, &activeCb, &feedbackCb);
+                  Speak(phrase.c_str(), true);
+                  ac.sendGoal(goal, &doneCb, &activeCb, &feedbackCb);
                   break;
         case 't':
         case 'm': std::cout << " {move accepted: " << target_name_ << "}" << std::endl;
@@ -161,12 +164,11 @@ int main(int argc, char** argv)
                   goal.target_pose.header.stamp = ros::Time::now();
                   goal.target_pose.pose = target_pose_;
                   phrase = (cmd_=='t' ? "Turning " : "Moving ") + target_name_;
-                  Speak(phrase.c_str());
-//                  ac.sendGoal(goal, &doneCb, &activeCb, &feedbackCb);
+                  Speak(phrase.c_str(), true);
+                  ac.sendGoal(goal, &doneCb, &activeCb, &feedbackCb);
                   break;
         case 's': std::cout << " {stop accepted}" << std::endl;
-                  phrase = "Fine.";
-                  Speak(phrase.c_str());
+                  Speak("Fine.");
                   ac.cancelAllGoals();
                   break;
         case 'b': std::cout << " {battery is at " << (int)(battery_state_.percentage * 100) << "% ("
@@ -176,7 +178,8 @@ int main(int argc, char** argv)
                   break;
         case 'i': { std::time_t tm = std::time(nullptr);
                   std::stringstream stm;
-                  stm << std::put_time(std::localtime(&tm), "%A, %B %e, %Y, %I:%M %p");
+                  //stm << std::put_time(std::localtime(&tm), "%A, %B %e, %Y, %I:%M %p");
+                  stm << std::put_time(std::localtime(&tm), "%I:%M %p");
                   std::cout << " {The time is " << stm.str() << "}" << std::endl;
                   phrase = "The time is " + stm.str();
                   Speak(phrase.c_str()); }
@@ -184,19 +187,55 @@ int main(int argc, char** argv)
         case 'n': phrase = "My name, is " + my_name;
                   Speak(phrase.c_str());
                   break;
-        case 'c': phrase = "No! You come here!";
-                  Speak(phrase.c_str());
+        case 'c': Speak("No, You come here!");
                   break;
         case 'q': stop_threads_ = true;
                   console_cmd_thread.join();
                   voice_cmd_thread.join();
                   return 0;
-        case '?':
-                  phrase = "What?";
-                  Speak(phrase.c_str());
+        case '!': //break;
+        case '?': Speak("What?");
+                  break;
         default : break;
       }
       cmd_ready_ = false;
+    }
+
+    if (battery_state_.percentage > 0.2)
+    {
+      low_bat_announce = 0;
+    }
+    else if (battery_state_.percentage <= 0.2 && battery_state_.percentage > 0.1)
+    {
+      if (low_bat_announce < 1)
+        Speak("Battery is getting low");
+      low_bat_announce = 1;
+    }
+    else if (battery_state_.percentage <= 0.1 && battery_state_.percentage > 0.05)
+    {
+      if (low_bat_announce < 2)
+        Speak("Battery is critical. Must go home soon!");
+      low_bat_announce = 2;
+    }
+    else if (battery_state_.percentage <= 0.05)
+    {
+      if (low_bat_announce < 3)
+      {
+        Speak("Battery is almost empty! I'm going home now!", true);
+        XmlRpcGoal goals;
+        if (_nh.getParam("goals", goals) == false)
+        {
+          ROS_ERROR("Unable to read goals parameters from yaml");
+        }
+        else
+        {
+          target_pose_ = goals.getPose('0');
+          target_name_ = goals.getName('0');
+          cmd_ = 'g';
+          cmd_ready_ = true;
+        }
+      }
+      low_bat_announce = 3;
     }
 
     ros::spinOnce();
@@ -241,6 +280,8 @@ void doneCb(const actionlib::SimpleClientGoalState& state,
 {
   std::cout << " <Finished in state [" << state.toString().c_str() << "]>" << std::endl;
   // result seems to be unused in move_base
+
+  Speak("I've arrived!");
 }
 
 
@@ -447,9 +488,8 @@ void VoiceCmdParser(ros::NodeHandle& nh)
   char const *hyp;
 
   config = cmd_ln_init(NULL, ps_args(), TRUE,
-                       "-hmm",  nh.param<std::string>("model_path", "").c_str(),
+                       "-hmm",  nh.param<std::string>("model_path", "/usr/local/share/pocketsphinx/model/en-us/en-us").c_str(),
                        "-dict", nh.param<std::string>("dictionary_file", "").c_str(),
-//                       "-kws_threshold", nh.param<std::string>("kws_threshold", "1e-20").c_str(),
                        "-logfn", "/dev/null",
                        NULL);
 
@@ -462,8 +502,6 @@ void VoiceCmdParser(ros::NodeHandle& nh)
     return;
   }
 
-//  std::string my_name = nh.param<std::string>("kws_name", "robot");
-//  ps_set_keyphrase(ps, "kws", my_name.c_str());
   std::string kws_file = nh.param<std::string>("keyphrase_file", "kws.list");
   ps_set_kws(ps, "kws", kws_file.c_str());
 
@@ -472,7 +510,6 @@ void VoiceCmdParser(ros::NodeHandle& nh)
 
   ps_set_search(ps, "kws");
   bool kws = true;
-  //ps_set_search(ps, "fsg");
 
   if ((ad = ad_open_dev(nh.param<std::string>("voice_input_dev", "sysdefault").c_str(),
                         (int)cmd_ln_float32_r(config,"-samprate"))) == NULL)
@@ -508,12 +545,12 @@ void VoiceCmdParser(ros::NodeHandle& nh)
     if(cmd_ready_)
       continue;
 
-    // read 128 ms of audio at a time
+    // read 128 ms of audio at a time, at 16kHz rate
     if ((k = ad_read(ad, adbuf, 2048)) < 0)
       ROS_ERROR_STREAM("Failed to read audio");
     ps_process_raw(ps, adbuf, k, FALSE, FALSE);
     in_speech = ps_get_in_speech(ps);
-    if (in_speech && !utt_started && !speaking_)
+    if (in_speech && !utt_started && !speaking_) // !espeak_IsPlaying())
     {
       utt_started = TRUE;
       ROS_INFO_STREAM("Listening...");
@@ -531,6 +568,8 @@ void VoiceCmdParser(ros::NodeHandle& nh)
           ROS_DEBUG_STREAM("Switched to FSG mode");
           kws = false;
           silence_counter = 0;
+          cmd_ = '!';
+          cmd_ready_ = true;
         }
         else
         { // check each action
@@ -718,7 +757,7 @@ int SpeachInit(const char *devicename, const char *voicename)
     return -3;
   }
 
-  espeak_SetParameter(espeakRATE, 100, 0);
+  espeak_SetParameter(espeakRATE, 120, 0);
   espeak_SetParameter(espeakVOLUME, 60, 0);
   espeak_SetParameter(espeakPITCH, 70, 0);
   espeak_SetParameter(espeakRANGE, 90, 0);
@@ -727,12 +766,20 @@ int SpeachInit(const char *devicename, const char *voicename)
 }
 
 
-void Speak(const char *phrase)
+void Speak(const char *phrase, bool wait_finished)
 {
   int synth_flags = espeakCHARS_AUTO | espeakPHONEMES | espeakENDPAUSE;
 
   if (EE_OK != espeak_Synth(phrase, strlen(phrase)+1, 0, POS_CHARACTER, 0, synth_flags, NULL, NULL))
     ROS_ERROR("Espeak synth error");
+  else if (wait_finished)
+  {
+    while(espeak_IsPlaying() && ros::ok())
+    {
+      ros::Duration(0.01).sleep();
+      ros::spinOnce();
+    }
+  }
 }
 
 

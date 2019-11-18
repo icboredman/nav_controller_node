@@ -17,4 +17,4 @@ grammar robot;
 <voice> = BE QUIET | VOICE ON ;
 <come> = COME HERE ;
 
-public <rules> = <go> | <move> | <turn> | STOP | <battery> | <name> | <time> | <voice> | <come> ;
+public <rules> = <go> | STOP | <move> | <turn> | <battery> ;
