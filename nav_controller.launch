@@ -2,7 +2,6 @@
     Launcher for rtabmap navigation controlled by nav_controller_node
 -->
 <launch>
-  <master auto="start"/>
   <env name="ROSCONSOLE_CONFIG_FILE"
        value="$(find nav_controller)/custom_rosconsole.config"/>
 
